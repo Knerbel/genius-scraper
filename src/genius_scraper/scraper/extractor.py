@@ -16,18 +16,23 @@ class ArtistReference:
     fragment: str
 
 
-def iter_links(node: Any) -> Iterator[str]:
-    """Walks a Genius 'dom' tree and yields all href values."""
+def iter_link_attributes(node: Any) -> Iterator[dict[str, Any]]:
+    """Walks a Genius 'dom' tree and yields the attributes of all <a> tags."""
     if isinstance(node, dict):
         if node.get("tag") == "a":
-            href = node.get("attributes", {}).get("href")
-            if href:
-                yield href
+            yield node.get("attributes", {})
         for child in node.get("children", []):
-            yield from iter_links(child)
+            yield from iter_link_attributes(child)
     elif isinstance(node, list):
         for child in node:
-            yield from iter_links(child)
+            yield from iter_link_attributes(child)
+
+
+def iter_links(node: Any) -> Iterator[str]:
+    """Walks a Genius 'dom' tree and yields all href values."""
+    for attrs in iter_link_attributes(node):
+        if attrs.get("href"):
+            yield attrs["href"]
 
 
 def extract_references(referent: dict[str, Any]) -> list[ArtistReference]:

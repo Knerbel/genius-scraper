@@ -33,6 +33,22 @@ class GeniusClient:
                 return artist
         return hits[0]["result"]["primary_artist"] if hits else None
 
+    def find_artist_id_by_url(self, artist_url: str) -> int | None:
+        slug = artist_url.rstrip("/").rsplit("/", 1)[-1]
+        for hit in self._get("/search", q=slug.replace("-", " "))["hits"]:
+            artist = hit["result"]["primary_artist"]
+            if artist["url"].lower() == artist_url.lower():
+                return artist["id"]
+        return None
+
+    def get_song(self, song_id: int) -> dict[str, Any]:
+        return self._get(f"/songs/{song_id}")["song"]
+
+    def get_most_popular_song(self, artist_id: int) -> dict[str, Any] | None:
+        songs = self._get(
+            f"/artists/{artist_id}/songs", sort="popularity", per_page=1)["songs"]
+        return songs[0] if songs else None
+
     def iter_artist_songs(self, artist_id: int, per_page: int = 50) -> Iterator[dict[str, Any]]:
         page: int | None = 1
         while page:
