@@ -1,11 +1,12 @@
 import argparse
+import json
 import logging
 
 from .config import load_settings
 from .db.session import init_db, make_session_factory
 from .pipeline import scrape_artist
 from .scraper.client import GeniusClient
-from .scraper.extractor import ARTIST_URL_RE, SONG_URL_RE, iter_links
+from .scraper.extractor import ARTIST_URL_RE, iter_links
 
 
 def main() -> None:
@@ -43,36 +44,19 @@ def main() -> None:
 
 def log_song_annotations(client: GeniusClient, song_id: int) -> None:
     log = logging.getLogger(__name__)
-    count = 0
-    total = 0
-    for referent in client.iter_referents(song_id, text_format="plain,dom"):
+    artists: dict[str, list[int]] = {}
+    for referent in client.iter_referents(song_id, text_format="dom"):
         for annotation in referent.get("annotations", []):
-            total += 1
-            body = annotation.get("body", {})
-            links = []
-            for href in dict.fromkeys(iter_links(body.get("dom"))):
-                if ARTIST_URL_RE.match(href):
-                    links.append(f"[ARTIST] {href}")
-                elif SONG_URL_RE.match(href):
-                    links.append(f"[SONG]   {href}")
-            if not links:
-                continue
-            count += 1
-            authors = ", ".join(
-                a["user"]["name"] for a in annotation.get("authors", []) if a.get("user"))
-            log.info(
-                "\n[%s] Annotation %s (votes: %s, by: %s)\n  Fragment: %s\n  %s\n  %s\n  Links:%s",
-                count,
-                annotation["id"],
-                annotation.get("votes_total"),
-                authors or "-",
-                referent.get("fragment"),
-                body.get("plain", "").replace("\n", "\n  "),
-                annotation.get("url"),
-                "".join(f"\n    - {link}" for link in links),
-            )
-    log.info("Found %d of %d annotations referencing artists or songs for song %d",
-             count, total, song_id)
+            for href in iter_links(annotation.get("body", {}).get("dom")):
+                match = ARTIST_URL_RE.match(href)
+                if not match:
+                    continue
+                # Genius slugs are case-insensitive, so lowercase to merge duplicates
+                ids = artists.setdefault(match.group(0).lower(), [])
+                if annotation["id"] not in ids:
+                    ids.append(annotation["id"])
+    log.info("Artist links (artist URL -> annotation IDs):\n%s",
+             json.dumps(artists, indent=2))
 
 
 if __name__ == "__main__":
