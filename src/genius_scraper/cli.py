@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +57,9 @@ def main() -> None:
                               settings.request_delay)
         results = crawl_song_references(
             client, args.song_id, args.max_songs,
-            make_session_factory(settings.database_url))
+            make_session_factory(settings.database_url),
+            on_update=lambda current: write_graph_html(
+                current, args.song_id, args.output, refresh=True))
         write_graph_html(results, args.song_id, args.output)
         logging.getLogger(__name__).info(
             "Graph written to %s", args.output.resolve())
@@ -96,12 +99,15 @@ def collect_referenced_artists(
 def crawl_song_references(
     client: GeniusClient, start_song_id: int, max_songs: int,
     session_factory: sessionmaker | None = None,
+    on_update: Callable[[dict[int, dict[str, Any]]], None] | None = None,
 ) -> dict[int, dict[str, Any]]:
     log = logging.getLogger(__name__)
     queue: deque[int] = deque([start_song_id])
     results: dict[int, dict[str, Any]] = {}
     # Artists recur across songs, so cache lookups to save API calls
     popular_songs: dict[str, dict[str, Any] | None] = {}
+    if on_update is not None:
+        on_update(results)
 
     while queue and len(results) < max_songs:
         song_id = queue.popleft()
@@ -149,6 +155,7 @@ def crawl_song_references(
                 artists, api_paths = stored_artists, {}
                 references = []
 
+            resolved_artists: dict[str, dict[str, Any]] = {}
             for i, (url, entry) in enumerate(artists.items(), start=1):
                 if url not in popular_songs:
                     log.info("    [%d/%d] Looking up most popular song for %s",
@@ -160,6 +167,10 @@ def crawl_song_references(
                     popular_songs[url] = (
                         {"id": song["id"], "title": song["title"]} if song else None)
                 entry["most_popular_song"] = popular_songs[url]
+                resolved_artists[url] = entry
+                if on_update is not None:
+                    on_update({**results, song_id: {
+                        "title": title, "referenced_artists": resolved_artists.copy()}})
 
             song_result = {"title": title, "referenced_artists": artists}
             if session_factory is not None:
@@ -187,6 +198,8 @@ def crawl_song_references(
                 queue.append(song["id"])
 
         results[song_id] = song_result
+        if on_update is not None:
+            on_update(results)
 
     log.info("Stopped after %d songs: %s", len(results),
              "limit reached" if queue else "no more songs to follow")

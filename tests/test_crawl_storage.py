@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker
 
 from genius_scraper.cli import crawl_song_references
 from genius_scraper.db.models import Artist, Base, Reference, Song, SongScan
+from genius_scraper.graph import write_graph_html
 from genius_scraper.pipeline import scrape_artist
 
 
@@ -143,3 +144,40 @@ def test_cached_graph_still_follows_next_song():
     client.calls.clear()
     assert crawl_song_references(client, 10, 2, factory) == first
     assert client.calls == []
+
+
+def test_graph_file_grows_after_each_new_artist(tmp_path):
+    class TwoArtistClient(FakeClient):
+        def iter_referents(self, song_id, text_format="dom"):
+            yield from super().iter_referents(song_id, text_format)
+            yield {
+                "fragment": "another nod",
+                "annotations": [{"id": 43, "body": {"dom": {"tag": "a", "attributes": {
+                    "href": "https://genius.com/artists/Other",
+                    "data-api_path": "/artists/3",
+                }}}}],
+            }
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    output = tmp_path / "graph.html"
+    snapshots = []
+
+    def update_graph(results):
+        write_graph_html(results, 10, output, refresh=True)
+        snapshots.append(output.read_text(encoding="utf-8"))
+
+    crawl_song_references(TwoArtistClient(), 10, 1,
+                          factory, on_update=update_graph)
+
+    assert "Target</button>" not in snapshots[0]
+    assert "Target</button>" in snapshots[1]
+    assert "Other</button>" not in snapshots[1]
+    assert "Target</button>" in snapshots[2]
+    assert "Other</button>" in snapshots[2]
+    assert all(
+        '<meta http-equiv="refresh" content="5">' in snapshot for snapshot in snapshots)
+    write_graph_html(
+        {10: {"title": "A song", "referenced_artists": {}}}, 10, output)
+    assert 'http-equiv="refresh"' not in output.read_text(encoding="utf-8")

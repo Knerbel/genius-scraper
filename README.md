@@ -97,6 +97,10 @@ songs with no artist references; saved graph results are reused to continue a cr
 Songs stored before scan tracking was added will be scanned once more to mark them
 complete.
 
+During `song-annotations`, the HTML graph is updated after each referenced artist
+is resolved. Open or reload the graph page after starting a crawl to see it
+refresh every five seconds; the final page stops refreshing when the crawl finishes.
+
 The default SQLite database is a local `genius.db` file in the directory where you
 run the command. It does not need a server or manual startup. If you set
 `DATABASE_URL` to PostgreSQL or another server database, that server must be running.

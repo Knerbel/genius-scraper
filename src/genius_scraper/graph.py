@@ -1,12 +1,14 @@
 import json
 from html import escape
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 _TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
+__REFRESH__
 <title>Genius reference graph</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
@@ -113,7 +115,8 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
-def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, path: Path) -> None:
+def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, path: Path,
+                     refresh: bool = False) -> None:
     graph = build_graph(results, start_song_id)
     songs = [node for node in graph["nodes"] if node["id"].startswith("song:")]
     artists = [node for node in graph["nodes"]
@@ -126,5 +129,14 @@ def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, pat
         ) for heading, group in (("Songs", songs), ("Artists", artists))
     )
     data = json.dumps(graph).replace("</", "<\\/")
-    path.write_text(_TEMPLATE.replace("__INDEX__", index).replace(
-        "__DATA__", data), encoding="utf-8")
+    refresh_tag = '<meta http-equiv="refresh" content="5">' if refresh else ""
+    html = _TEMPLATE.replace("__REFRESH__", refresh_tag).replace(
+        "__INDEX__", index).replace("__DATA__", data)
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                            prefix=f".{path.name}.", suffix=".tmp", delete=False) as output:
+        output.write(html)
+    temporary = Path(output.name)
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
