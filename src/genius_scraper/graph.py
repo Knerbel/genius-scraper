@@ -1,4 +1,5 @@
 import json
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -9,27 +10,60 @@ _TEMPLATE = """<!DOCTYPE html>
 <title>Genius reference graph</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
-  html, body { margin: 0; height: 100%; font-family: sans-serif; }
-  #graph { width: 100%; height: 100%; }
-  #legend { position: absolute; top: 10px; left: 10px; background: #fff;
-            padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: sans-serif; }
+    #layout { display: flex; width: 100%; height: 100vh; height: 100dvh; }
+    #sidebar { width: clamp(210px, 22vw, 300px); flex: none; display: flex;
+                         flex-direction: column; border-right: 1px solid #d8dfe5; background: #fff; }
+    #legend { padding: 12px 16px; border-bottom: 1px solid #d8dfe5;
+                        font-size: 13px; line-height: 1.7; }
+    #node-index { overflow-y: auto; flex: 1; padding: 8px 0 16px; }
+    #node-index h2 { margin: 12px 16px 4px; color: #53616a; font-size: 12px; }
+    .node-link { display: block; width: 100%; padding: 7px 16px; border: 0;
+                             background: transparent; text-align: left; font: inherit;
+                             font-size: 13px; line-height: 1.4; cursor: pointer;
+                             overflow-wrap: anywhere; }
+    .node-link:hover, .node-link:focus-visible { background: #eaf4f8; }
+    .node-link:focus-visible { outline: 2px solid #207ca6; outline-offset: -2px; }
+    #graph { flex: 1; min-width: 0; }
   .dot { display: inline-block; width: 12px; height: 12px; margin-right: 6px; }
+    @media (max-width: 640px) {
+        #layout { flex-direction: column-reverse; }
+        #sidebar { width: 100%; height: 36%; border-right: 0;
+                             border-top: 1px solid #d8dfe5; }
+        #legend { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 6px 12px; }
+        #graph { min-height: 0; }
+    }
 </style>
 </head>
 <body>
+<div id="layout">
+<aside id="sidebar">
 <div id="legend">
   <div><span class="dot" style="background:#e74c3c"></span>Start song</div>
   <div><span class="dot" style="background:#3498db"></span>Scanned song</div>
   <div><span class="dot" style="background:#bdc3c7"></span>Not scanned (limit)</div>
   <div><span class="dot" style="background:#f39c12;border-radius:50%"></span>Artist</div>
 </div>
+<nav id="node-index" aria-label="Graph nodes">
+__INDEX__
+</nav>
+</aside>
 <div id="graph"></div>
+</div>
 <script>
   const data = __DATA__;
-  new vis.Network(document.getElementById("graph"),
+    const network = new vis.Network(document.getElementById("graph"),
     { nodes: new vis.DataSet(data.nodes), edges: new vis.DataSet(data.edges) },
     { edges: { arrows: "to", smooth: false },
       physics: { solver: "forceAtlas2Based", stabilization: { iterations: 200 } } });
+    document.querySelectorAll(".node-link").forEach(button => {
+        button.addEventListener("click", () => {
+            const id = button.dataset.nodeId;
+            network.selectNodes([id]);
+            network.focus(id, { scale: 1.1, animation: { duration: 400 } });
+        });
+    });
 </script>
 </body>
 </html>
@@ -80,7 +114,17 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
 
 
 def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, path: Path) -> None:
-    # Escape "</" so song titles can't close the <script> tag
-    data = json.dumps(build_graph(results, start_song_id)
-                      ).replace("</", "<\\/")
-    path.write_text(_TEMPLATE.replace("__DATA__", data), encoding="utf-8")
+    graph = build_graph(results, start_song_id)
+    songs = [node for node in graph["nodes"] if node["id"].startswith("song:")]
+    artists = [node for node in graph["nodes"]
+               if node["id"].startswith("artist:")]
+    index = "".join(
+        f"<h2>{heading}</h2>\n" + "".join(
+            f'<button type="button" class="node-link" data-node-id="{escape(node["id"], quote=True)}">'
+            f'{escape(node["label"] or "")}</button>\n'
+            for node in sorted(group, key=lambda node: (node["label"] or "").casefold())
+        ) for heading, group in (("Songs", songs), ("Artists", artists))
+    )
+    data = json.dumps(graph).replace("</", "<\\/")
+    path.write_text(_TEMPLATE.replace("__INDEX__", index).replace(
+        "__DATA__", data), encoding="utf-8")
