@@ -1,4 +1,21 @@
-from genius_scraper.graph import write_graph_html
+from genius_scraper.graph import build_graph, write_graph_html
+
+
+def test_primary_artist_has_colored_arrow_to_song():
+    artist = "https://genius.com/artists/source"
+    graph = build_graph({1: {
+        "title": "Start", "artist": "Source", "artist_url": artist,
+        "referenced_artists": {artist: {
+            "annotation_ids": [7], "most_popular_song": {"id": 2, "title": "Hit"},
+        }},
+    }}, 1)
+
+    assert len([node for node in graph["nodes"]
+               if node["id"] == f"artist:{artist}"]) == 1
+    assert {"from": f"artist:{artist}", "to": "song:1",
+            "color": "#27ae60", "title": "primary artist"} in graph["edges"]
+    assert {"from": f"artist:{artist}", "to": "song:2", "dashes": True,
+            "title": "most popular song"} in graph["edges"]
 
 
 def test_graph_exposes_searchable_names_as_escaped_html(tmp_path):

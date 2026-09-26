@@ -18,6 +18,8 @@ from .pipeline import scrape_artist
 from .scraper.client import GeniusClient
 from .scraper.extractor import ARTIST_URL_RE, ArtistReference, extract_references, iter_link_attributes
 
+MIN_ARTIST_FOLLOWERS = 100
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="genius-scraper")
@@ -106,6 +108,15 @@ def crawl_song_references(
     results: dict[int, dict[str, Any]] = {}
     # Artists recur across songs, so cache lookups to save API calls
     popular_songs: dict[str, dict[str, Any] | None] = {}
+    eligible_artists: dict[str, bool] = {}
+
+    def is_eligible_artist(url: str, artist_id: int | None) -> bool:
+        if url not in eligible_artists:
+            artist = client.get_artist(artist_id) if artist_id else None
+            eligible_artists[url] = bool(
+                artist and artist.get("followers_count", 0) >= MIN_ARTIST_FOLLOWERS)
+        return eligible_artists[url]
+
     if on_update is not None:
         on_update(results)
 
@@ -118,6 +129,7 @@ def crawl_song_references(
         stored_song_id = None
         stored_title = None
         stored_artist_name = None
+        stored_artist_url = None
         if session_factory is not None:
             with session_factory() as session:
                 scan = Repository(session).get_song_scan(song_id)
@@ -128,6 +140,7 @@ def crawl_song_references(
                         stored_song = session.get(Song, scan.song_id)
                         stored_title = stored_song.title
                         stored_artist_name = stored_song.primary_artist.name
+                        stored_artist_url = stored_song.primary_artist.url.lower()
                         stored_artists = {}
                         for ref in session.scalars(
                             select(Reference).where(
@@ -143,20 +156,29 @@ def crawl_song_references(
             log.info("[%d/%d] Reusing song %d %s", len(results) + 1,
                      max_songs, song_id, cached["title"])
             song_result = cached
-            if "artist" not in song_result:
+            if "artist" not in song_result or "artist_url" not in song_result:
                 with session_factory() as session, session.begin():
                     repo = Repository(session)
                     stored_song = session.get(Song, stored_song_id)
-                    song_result["artist"] = stored_song.primary_artist.name
+                    song_result = {**cached, "artist": stored_song.primary_artist.name,
+                                   "artist_url": stored_song.primary_artist.url.lower()}
                     repo.save_song_scan(stored_song, song_result)
-            for url, entry in cached["referenced_artists"].items():
-                popular_songs.setdefault(url, entry["most_popular_song"])
+                if "artist" not in cached:
+                    for url in list(cached["referenced_artists"]):
+                        artist_id = client.find_artist_id_by_url(url)
+                        if not is_eligible_artist(url, artist_id):
+                            del cached["referenced_artists"][url]
+                            continue
+                        entry = cached["referenced_artists"][url]
+                    popular_songs.setdefault(url, entry["most_popular_song"])
         else:
             song_data = client.get_song(
                 song_id) if stored_artists is None else None
             title = song_data["title"] if song_data is not None else stored_title
             artist_name = (song_data["primary_artist"]["name"]
                            if song_data is not None else stored_artist_name)
+            artist_url = (song_data["primary_artist"]["url"].lower()
+                          if song_data is not None else stored_artist_url)
             log.info("[%d/%d] Scanning song %d %s", len(results) + 1,
                      max_songs, song_id, title)
             if stored_artists is None:
@@ -173,6 +195,11 @@ def crawl_song_references(
                              i, len(artists), url)
                     artist_id = (int(api_paths[url].rsplit("/", 1)[-1]) if url in api_paths
                                  else client.find_artist_id_by_url(url))
+                    if not is_eligible_artist(url, artist_id):
+                        log.info("    Skipping %s: fewer than %d followers",
+                                 url, MIN_ARTIST_FOLLOWERS)
+                        popular_songs[url] = None
+                        continue
                     song = client.get_most_popular_song(
                         artist_id) if artist_id else None
                     popular_songs[url] = (
@@ -181,11 +208,11 @@ def crawl_song_references(
                 resolved_artists[url] = entry
                 if on_update is not None:
                     on_update({**results, song_id: {
-                        "title": title, "artist": artist_name,
+                        "title": title, "artist": artist_name, "artist_url": artist_url,
                         "referenced_artists": resolved_artists.copy()}})
 
-            song_result = {"title": title, "artist": artist_name,
-                           "referenced_artists": artists}
+            song_result = {"title": title, "artist": artist_name, "artist_url": artist_url,
+                           "referenced_artists": resolved_artists}
             if session_factory is not None:
                 with session_factory() as session, session.begin():
                     repo = Repository(session)

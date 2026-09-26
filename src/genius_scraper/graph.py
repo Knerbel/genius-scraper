@@ -28,14 +28,25 @@ __REFRESH__
     .node-link:hover, .node-link:focus-visible { background: #eaf4f8; }
     .node-link:focus-visible { outline: 2px solid #207ca6; outline-offset: -2px; }
     .node-count { color: #7a8a93; }
-    #graph { flex: 1; min-width: 0; }
+    #graph-wrap { flex: 1; min-width: 0; position: relative; }
+    #graph { position: absolute; inset: 0; }
   .dot { display: inline-block; width: 12px; height: 12px; margin-right: 6px; }
+    #barchart { position: absolute; top: 12px; right: 12px; width: clamp(220px, 26vw, 320px);
+                            background: rgba(255,255,255,0.92); border: 1px solid #d8dfe5;
+                            border-radius: 6px; padding: 10px 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+    #barchart h3 { margin: 0 0 8px; font-size: 12px; color: #53616a; }
+    .bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+    .bar-label { width: 35%; flex: none; overflow: hidden; text-overflow: ellipsis;
+                             white-space: nowrap; }
+    .bar-track { flex: 1; background: #eef1f3; border-radius: 3px; height: 14px; position: relative; }
+    .bar-fill { display: block; background: #f39c12; height: 100%; border-radius: 3px; }
+    .bar-value { flex: none; width: 28px; text-align: right; color: #53616a; }
     @media (max-width: 640px) {
         #layout { flex-direction: column-reverse; }
         #sidebar { width: 100%; height: 36%; border-right: 0;
                              border-top: 1px solid #d8dfe5; }
         #legend { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 6px 12px; }
-        #graph { min-height: 0; }
+        #graph-wrap { min-height: 0; }
     }
 </style>
 </head>
@@ -47,15 +58,34 @@ __REFRESH__
   <div><span class="dot" style="background:#3498db"></span>Scanned song</div>
   <div><span class="dot" style="background:#bdc3c7"></span>Not scanned (limit)</div>
   <div><span class="dot" style="background:#f39c12;border-radius:50%"></span>Artist</div>
+    <div><span class="dot" style="background:#27ae60;height:3px;vertical-align:middle"></span>Primary artist arrow</div>
 </div>
 <nav id="node-index" aria-label="Graph nodes">
 __INDEX__
 </nav>
 </aside>
+<div id="graph-wrap">
 <div id="graph"></div>
+<div id="barchart">
+    <h3>Top artists by references</h3>
+    <div id="barchart-rows"></div>
+</div>
+</div>
 </div>
 <script>
   const data = __DATA__;
+    const topArtists = data.nodes
+        .filter(node => node.id.startsWith("artist:") && typeof node.count === "number")
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+    const maxCount = topArtists.length ? topArtists[0].count : 0;
+    document.getElementById("barchart-rows").innerHTML = topArtists.map(node => `
+        <div class="bar-row">
+            <span class="bar-label" title="${node.label}">${node.label}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${maxCount ? (node.count / maxCount) * 100 : 0}%"></span></span>
+            <span class="bar-value">${node.count}</span>
+        </div>
+    `).join("");
     const network = new vis.Network(document.getElementById("graph"),
     { nodes: new vis.DataSet(data.nodes), edges: new vis.DataSet(data.edges) },
     { edges: { arrows: "to", smooth: false },
@@ -103,6 +133,15 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
         }
 
     for song_id, song in results.items():
+        artist_url = song.get("artist_url")
+        if artist_url:
+            artist_node = f"artist:{artist_url.lower()}"
+            nodes.setdefault(artist_node, {
+                "id": artist_node, "label": song.get("artist") or _artist_label(artist_url),
+                "shape": "dot", "color": "#f39c12",
+            })
+            edges.append({"from": artist_node, "to": f"song:{song_id}",
+                          "color": "#27ae60", "title": "primary artist"})
         for url, artist in song["referenced_artists"].items():
             artist_node = f"artist:{url}"
             reference_counts[artist_node] = reference_counts.get(
@@ -128,7 +167,8 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
             if edge not in edges:
                 edges.append(edge)
 
-    for artist_node, count in reference_counts.items():
+    for artist_node in (node for node in nodes if node.startswith("artist:")):
+        count = reference_counts.get(artist_node, 0)
         count += sum(song_counts.get(song_node, 0)
                      for song_node in artist_songs.get(artist_node, ()))
         annotations = "annotation" if count == 1 else "annotations"

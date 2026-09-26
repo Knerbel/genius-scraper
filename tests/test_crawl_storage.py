@@ -22,6 +22,10 @@ class FakeClient:
             },
         }
 
+    def get_artist(self, artist_id):
+        self.calls.append(("get_artist", artist_id))
+        return {"id": artist_id, "followers_count": 100}
+
     def iter_referents(self, song_id, text_format="dom"):
         self.calls.append(("iter_referents", song_id))
         yield {
@@ -57,6 +61,7 @@ def test_crawl_stores_connections_and_deduplicates_repeated_scans():
     client = FakeClient()
 
     results = crawl_song_references(client, 10, 1, factory)
+    assert results[10]["artist_url"] == "https://genius.com/artists/source"
     assert results[10]["referenced_artists"]["https://genius.com/artists/target"]["annotation_ids"] == [42]
     client.calls.clear()
     assert crawl_song_references(client, 10, 1, factory) == results
@@ -71,6 +76,25 @@ def test_crawl_stores_connections_and_deduplicates_repeated_scans():
         assert session.scalar(select(Artist).where(
             Artist.id == reference.referenced_artist_id)).url == "https://genius.com/artists/target"
         assert len(session.scalars(select(Reference)).all()) == 1
+
+
+def test_crawl_skips_artists_with_fewer_than_100_followers():
+    class FollowerClient(FakeClient):
+        def get_artist(self, artist_id):
+            self.calls.append(("get_artist", artist_id))
+            return {"id": artist_id, "followers_count": 99}
+
+        def get_most_popular_song(self, artist_id):
+            raise AssertionError("ineligible artists must not be followed")
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    results = crawl_song_references(FollowerClient(), 10, 2, factory)
+
+    assert set(results) == {10}
+    assert results[10]["referenced_artists"] == {}
 
 
 def test_artist_scrape_skips_songs_already_scanned():
@@ -100,7 +124,29 @@ def test_crawl_reuses_artist_scrape_without_refetching_annotations():
     result = crawl_song_references(client, 10, 1, factory)
 
     assert ("iter_referents", 10) not in client.calls
+    assert result[10]["artist_url"] == "https://genius.com/artists/source"
     assert result[10]["referenced_artists"]["https://genius.com/artists/target"]["annotation_ids"] == [42]
+
+
+def test_crawl_backfills_primary_artist_url_in_old_cache():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    client = FakeClient()
+    crawl_song_references(client, 10, 1, factory)
+    with factory() as session, session.begin():
+        scan = session.scalar(select(SongScan))
+        scan.graph_data = {key: value for key, value in scan.graph_data.items()
+                           if key != "artist_url"}
+
+    client.calls.clear()
+    result = crawl_song_references(client, 10, 1, factory)
+
+    assert result[10]["artist_url"] == "https://genius.com/artists/source"
+    assert client.calls == []
+    with factory() as session:
+        assert session.scalar(
+            select(SongScan)).graph_data["artist_url"] == result[10]["artist_url"]
 
 
 def test_empty_song_is_cached_too():

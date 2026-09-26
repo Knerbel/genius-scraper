@@ -44,6 +44,9 @@ class GeniusClient:
     def get_song(self, song_id: int) -> dict[str, Any]:
         return self._get(f"/songs/{song_id}")["song"]
 
+    def get_artist(self, artist_id: int) -> dict[str, Any]:
+        return self._get(f"/artists/{artist_id}")["artist"]
+
     def get_most_popular_song(self, artist_id: int) -> dict[str, Any] | None:
         songs = self._get(
             f"/artists/{artist_id}/songs", sort="popularity", per_page=1)["songs"]
