@@ -1,4 +1,6 @@
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -29,6 +31,14 @@ class Song(Base):
 
     primary_artist: Mapped[Artist] = relationship(back_populates="songs")
     references: Mapped[list["Reference"]] = relationship(back_populates="song")
+
+
+class SongScan(Base):
+    __tablename__ = "song_scans"
+
+    song_id: Mapped[int] = mapped_column(
+        ForeignKey("songs.id"), primary_key=True)
+    graph_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class Reference(Base):

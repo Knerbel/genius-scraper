@@ -1,7 +1,9 @@
-from sqlalchemy import select
+from typing import Any
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .models import Artist, Reference, Song
+from .models import Artist, Reference, Song, SongScan
 
 
 class Repository:
@@ -9,7 +11,8 @@ class Repository:
         self.session = session
 
     def upsert_artist(self, url: str, genius_id: int | None = None, name: str | None = None) -> Artist:
-        artist = self.session.scalar(select(Artist).where(Artist.url == url))
+        artist = self.session.scalar(select(Artist).where(
+            func.lower(Artist.url) == url.lower()))
         if artist is None:
             artist = Artist(url=url)
             self.session.add(artist)
@@ -29,6 +32,17 @@ class Repository:
             self.session.add(song)
             self.session.flush()
         return song
+
+    def get_song_scan(self, genius_id: int) -> SongScan | None:
+        return self.session.scalar(
+            select(SongScan).join(Song).where(Song.genius_id == genius_id))
+
+    def save_song_scan(self, song: Song, graph_data: dict[str, Any] | None = None) -> None:
+        scan = self.session.get(SongScan, song.id)
+        if scan is None:
+            self.session.add(SongScan(song_id=song.id, graph_data=graph_data))
+        elif graph_data is not None:
+            scan.graph_data = graph_data
 
     def add_reference(self, song: Song, artist: Artist, annotation_id: int, fragment: str) -> None:
         exists = self.session.scalar(

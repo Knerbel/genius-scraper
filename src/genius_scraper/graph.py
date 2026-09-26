@@ -81,5 +81,6 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
 
 def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, path: Path) -> None:
     # Escape "</" so song titles can't close the <script> tag
-    data = json.dumps(build_graph(results, start_song_id)).replace("</", "<\\/")
+    data = json.dumps(build_graph(results, start_song_id)
+                      ).replace("</", "<\\/")
     path.write_text(_TEMPLATE.replace("__DATA__", data), encoding="utf-8")

@@ -24,6 +24,9 @@ def scrape_artist(client: GeniusClient, session_factory: sessionmaker, name: str
 
         with session_factory() as session, session.begin():
             repo = Repository(session)
+            if repo.get_song_scan(song_data["id"]) is not None:
+                log.info("  %s: already scanned", song_data["title"])
+                continue
             artist = repo.upsert_artist(
                 artist_data["url"], artist_data["id"], artist_data["name"])
             song = repo.upsert_song(
@@ -38,4 +41,5 @@ def scrape_artist(client: GeniusClient, session_factory: sessionmaker, name: str
                     repo.add_reference(
                         song, target, ref.annotation_id, ref.fragment)
                     count += 1
+            repo.save_song_scan(song)
             log.info("  %s: %d references", song_data["title"], count)

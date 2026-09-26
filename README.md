@@ -85,8 +85,21 @@ Get an API access token at <https://genius.com/api-clients>.
 ```powershell
 genius-scraper init-db
 genius-scraper scrape-artist "Kendrick Lamar" --max-songs 50
+genius-scraper song-annotations 4589365 --max-songs 5
 pytest
 ```
+
+Both scraping commands create the database tables if needed and save discovered
+song-to-artist annotation references to `DATABASE_URL`. `song-annotations` also
+writes an HTML graph (by default, `graph.html`). Repeated scans do not duplicate
+previously stored references. Completed songs are skipped on later runs, including
+songs with no artist references; saved graph results are reused to continue a crawl.
+Songs stored before scan tracking was added will be scanned once more to mark them
+complete.
+
+The default SQLite database is a local `genius.db` file in the directory where you
+run the command. It does not need a server or manual startup. If you set
+`DATABASE_URL` to PostgreSQL or another server database, that server must be running.
 
 ## Configuration
 
