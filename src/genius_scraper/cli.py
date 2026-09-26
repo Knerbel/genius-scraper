@@ -117,14 +117,17 @@ def crawl_song_references(
         stored_artists = None
         stored_song_id = None
         stored_title = None
+        stored_artist_name = None
         if session_factory is not None:
             with session_factory() as session:
                 scan = Repository(session).get_song_scan(song_id)
                 if scan is not None:
                     cached = scan.graph_data
+                    stored_song_id = scan.song_id
                     if cached is None:
-                        stored_song_id = scan.song_id
-                        stored_title = session.get(Song, scan.song_id).title
+                        stored_song = session.get(Song, scan.song_id)
+                        stored_title = stored_song.title
+                        stored_artist_name = stored_song.primary_artist.name
                         stored_artists = {}
                         for ref in session.scalars(
                             select(Reference).where(
@@ -140,12 +143,20 @@ def crawl_song_references(
             log.info("[%d/%d] Reusing song %d %s", len(results) + 1,
                      max_songs, song_id, cached["title"])
             song_result = cached
+            if "artist" not in song_result:
+                with session_factory() as session, session.begin():
+                    repo = Repository(session)
+                    stored_song = session.get(Song, stored_song_id)
+                    song_result["artist"] = stored_song.primary_artist.name
+                    repo.save_song_scan(stored_song, song_result)
             for url, entry in cached["referenced_artists"].items():
                 popular_songs.setdefault(url, entry["most_popular_song"])
         else:
             song_data = client.get_song(
                 song_id) if stored_artists is None else None
             title = song_data["title"] if song_data is not None else stored_title
+            artist_name = (song_data["primary_artist"]["name"]
+                           if song_data is not None else stored_artist_name)
             log.info("[%d/%d] Scanning song %d %s", len(results) + 1,
                      max_songs, song_id, title)
             if stored_artists is None:
@@ -170,9 +181,11 @@ def crawl_song_references(
                 resolved_artists[url] = entry
                 if on_update is not None:
                     on_update({**results, song_id: {
-                        "title": title, "referenced_artists": resolved_artists.copy()}})
+                        "title": title, "artist": artist_name,
+                        "referenced_artists": resolved_artists.copy()}})
 
-            song_result = {"title": title, "referenced_artists": artists}
+            song_result = {"title": title, "artist": artist_name,
+                           "referenced_artists": artists}
             if session_factory is not None:
                 with session_factory() as session, session.begin():
                     repo = Repository(session)
@@ -203,7 +216,7 @@ def crawl_song_references(
 
     log.info("Stopped after %d songs: %s", len(results),
              "limit reached" if queue else "no more songs to follow")
-    log.info("Results:\n%s", json.dumps(results, indent=2))
+    # log.info("Results:\n%s", json.dumps(results, indent=2))
     return results
 
 

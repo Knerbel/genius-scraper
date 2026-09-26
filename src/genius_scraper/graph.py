@@ -27,6 +27,7 @@ __REFRESH__
                              overflow-wrap: anywhere; }
     .node-link:hover, .node-link:focus-visible { background: #eaf4f8; }
     .node-link:focus-visible { outline: 2px solid #207ca6; outline-offset: -2px; }
+    .node-count { color: #7a8a93; }
     #graph { flex: 1; min-width: 0; }
   .dot { display: inline-block; width: 12px; height: 12px; margin-right: 6px; }
     @media (max-width: 640px) {
@@ -79,11 +80,23 @@ def _artist_label(url: str) -> str:
 def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[str, list]:
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
+    reference_counts: dict[str, int] = {}
+    song_counts: dict[str, int] = {}
+    artist_songs: dict[str, set[str]] = {}
 
     for song_id, song in results.items():
+        label = song["title"] or f"Song {song_id}"
+        count = sum(len(artist["annotation_ids"])
+                    for artist in song["referenced_artists"].values())
+        song_counts[f"song:{song_id}"] = count
+        annotations = "annotation" if count == 1 else "annotations"
+        title = f"{label} - {count} {annotations}"
+        if song.get("artist"):
+            title = f"{label} by {song['artist']} - {count} {annotations}"
         nodes[f"song:{song_id}"] = {
             "id": f"song:{song_id}",
-            "label": song["title"] or f"Song {song_id}",
+            "label": label,
+            "title": title,
             "shape": "box",
             "color": "#e74c3c" if song_id == start_song_id else "#3498db",
             "font": {"color": "#fff"},
@@ -92,8 +105,10 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
     for song_id, song in results.items():
         for url, artist in song["referenced_artists"].items():
             artist_node = f"artist:{url}"
+            reference_counts[artist_node] = reference_counts.get(
+                artist_node, 0) + len(artist["annotation_ids"])
             nodes.setdefault(artist_node, {
-                "id": artist_node, "label": _artist_label(url), "title": url,
+                "id": artist_node, "label": _artist_label(url),
                 "shape": "dot", "color": "#f39c12",
             })
             edges.append({"from": f"song:{song_id}", "to": artist_node,
@@ -103,6 +118,7 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
             if not popular:
                 continue
             song_node = f"song:{popular['id']}"
+            artist_songs.setdefault(artist_node, set()).add(song_node)
             nodes.setdefault(song_node, {
                 "id": song_node, "label": popular["title"], "shape": "box",
                 "color": "#bdc3c7",
@@ -111,6 +127,13 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
                     "title": "most popular song"}
             if edge not in edges:
                 edges.append(edge)
+
+    for artist_node, count in reference_counts.items():
+        count += sum(song_counts.get(song_node, 0)
+                     for song_node in artist_songs.get(artist_node, ()))
+        annotations = "annotation" if count == 1 else "annotations"
+        nodes[artist_node]["title"] = f"{nodes[artist_node]['label']} - {count} {annotations}"
+        nodes[artist_node]["count"] = count
 
     return {"nodes": list(nodes.values()), "edges": edges}
 
@@ -124,7 +147,9 @@ def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, pat
     index = "".join(
         f"<h2>{heading}</h2>\n" + "".join(
             f'<button type="button" class="node-link" data-node-id="{escape(node["id"], quote=True)}">'
-            f'{escape(node["label"] or "")}</button>\n'
+            f'{escape(node["label"] or "")}'
+            + (f' <span class="node-count">({node["count"]})</span>' if "count" in node else "")
+            + '</button>\n'
             for node in sorted(group, key=lambda node: (node["label"] or "").casefold())
         ) for heading, group in (("Songs", songs), ("Artists", artists))
     )

@@ -171,11 +171,11 @@ def test_graph_file_grows_after_each_new_artist(tmp_path):
     crawl_song_references(TwoArtistClient(), 10, 1,
                           factory, on_update=update_graph)
 
-    assert "Target</button>" not in snapshots[0]
-    assert "Target</button>" in snapshots[1]
-    assert "Other</button>" not in snapshots[1]
-    assert "Target</button>" in snapshots[2]
-    assert "Other</button>" in snapshots[2]
+    assert 'Target <span class="node-count">(1)</span></button>' not in snapshots[0]
+    assert 'Target <span class="node-count">(1)</span></button>' in snapshots[1]
+    assert 'Other <span class="node-count">(1)</span></button>' not in snapshots[1]
+    assert 'Target <span class="node-count">(1)</span></button>' in snapshots[2]
+    assert 'Other <span class="node-count">(1)</span></button>' in snapshots[2]
     assert all(
         '<meta http-equiv="refresh" content="5">' in snapshot for snapshot in snapshots)
     write_graph_html(
