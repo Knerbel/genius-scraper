@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import genius_scraper.graph as graph_module
 from genius_scraper.graph import build_graph, write_graph_html
 
 
@@ -40,6 +43,29 @@ def test_graph_exposes_searchable_names_as_escaped_html(tmp_path):
     assert "Next &amp; Song</button>" in html
     assert 'data-node-id="song:1"' in html
     assert 'data-node-id="artist:https://genius.com/artists/some-artist"' in html
+
+
+def test_graph_retries_when_windows_temporarily_locks_output(tmp_path, monkeypatch):
+    output = tmp_path / "graph.html"
+    output.write_text("old", encoding="utf-8")
+    original_replace = Path.replace
+    attempts = 0
+
+    def intermittently_locked(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError(5, "Access is denied", destination)
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", intermittently_locked)
+    monkeypatch.setattr(graph_module, "sleep", lambda _: None)
+
+    write_graph_html(
+        {1: {"title": "Start", "referenced_artists": {}}}, 1, output)
+
+    assert attempts == 3
+    assert "Start" in output.read_text(encoding="utf-8")
 
 
 def test_artist_count_includes_references_of_its_songs(tmp_path):

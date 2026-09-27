@@ -2,6 +2,7 @@ import json
 from html import escape
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import sleep
 from typing import Any
 
 _TEMPLATE = """<!DOCTYPE html>
@@ -413,6 +414,17 @@ def build_graph(results: dict[int, dict[str, Any]], start_song_id: int) -> dict[
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
+def _replace_with_retry(source: Path, destination: Path, attempts: int = 10) -> None:
+    for attempt in range(attempts):
+        try:
+            source.replace(destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            sleep(0.1)
+
+
 def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, path: Path,
                      refresh: bool = False) -> None:
     graph = build_graph(results, start_song_id)
@@ -437,6 +449,6 @@ def write_graph_html(results: dict[int, dict[str, Any]], start_song_id: int, pat
         output.write(html)
     temporary = Path(output.name)
     try:
-        temporary.replace(path)
+        _replace_with_retry(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
