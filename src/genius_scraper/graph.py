@@ -15,7 +15,8 @@ __REFRESH__
 <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; font-family: sans-serif; }
-    #layout { display: flex; width: 100%; height: 100vh; height: 100dvh; }
+    body { display: flex; flex-direction: column; }
+    #layout { display: flex; width: 100%; flex: 1; min-height: 0; }
     #sidebar { width: clamp(210px, 22vw, 300px); flex: none; display: flex;
                          flex-direction: column; border-right: 1px solid #d8dfe5; background: #fff; }
     #legend { padding: 12px 16px; border-bottom: 1px solid #d8dfe5;
@@ -66,6 +67,15 @@ __REFRESH__
     .pf-node:hover { background: #f1e4f7; }
     .pf-rel { padding: 3px 0 3px 14px; margin-left: 8px; border-left: 2px solid #8e44ad;
               color: #6c5a75; font-size: 12px; font-style: italic; }
+    #searchbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+                 border-top: 1px solid #d8dfe5; background: #fff; font-size: 13px; }
+    #searchbar label { color: #53616a; }
+    #search-input { flex: 1; min-width: 0; max-width: 420px; padding: 6px 8px;
+                    border: 1px solid #c5cfd6; border-radius: 4px; font: inherit; }
+    #searchbar button { padding: 6px 12px; border: 1px solid #207ca6; border-radius: 4px;
+                        background: #207ca6; color: #fff; font: inherit; cursor: pointer; }
+    #searchbar button:disabled { background: #9fb6c1; border-color: #9fb6c1; cursor: default; }
+    #search-status { color: #53616a; overflow-wrap: anywhere; }
     @media (max-width: 640px) {
         #layout { flex-direction: column-reverse; }
         #sidebar { width: 100%; height: 36%; border-right: 0;
@@ -115,6 +125,12 @@ __INDEX__
 </div>
 </div>
 </div>
+<form id="searchbar" autocomplete="off">
+  <label for="search-input">Scrape</label>
+  <input id="search-input" placeholder="Song or artist name on Genius" aria-label="Song or artist name">
+  <button type="submit" id="search-go">Start</button>
+  <span id="search-status" role="status"></span>
+</form>
 <script>
   const data = __DATA__;
     const topArtists = data.nodes
@@ -123,7 +139,7 @@ __INDEX__
         .slice(0, 5);
     const maxCount = topArtists.length ? topArtists[0].count : 0;
     document.getElementById("barchart-rows").innerHTML = topArtists.map(node => `
-        <div class="bar-row">
+        <div class="bar-row" data-node-id="${node.id}" role="button" tabindex="0">
             <span class="bar-label" title="${node.label}">${node.label}</span>
             <span class="bar-track"><span class="bar-fill" style="width:${maxCount ? (node.count / maxCount) * 100 : 0}%"></span></span>
             <span class="bar-value">${node.count}</span>
@@ -322,6 +338,90 @@ __INDEX__
             else focusNode(id);
         });
     });
+
+    document.querySelectorAll(".bar-row").forEach(row => {
+        const activate = () => {
+            const id = row.dataset.nodeId;
+            if (picking) pick(id);
+            else focusNode(id);
+        };
+        row.addEventListener("click", activate);
+        row.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") activate();
+        });
+    });
+
+    const searchForm = $("searchbar"), searchInput = $("search-input");
+    const searchButton = $("search-go"), searchStatus = $("search-status");
+
+    function setSearchStatus(text, keep) {
+        searchStatus.textContent = text;
+        try {
+            if (keep) sessionStorage.setItem("search", JSON.stringify(
+                { query: searchInput.value, status: text, finished: keep === "finished" }));
+            else sessionStorage.removeItem("search");
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    async function pollStatus() {
+        let status;
+        try {
+            status = await (await fetch("status", { cache: "no-store" })).json();
+        } catch (error) {
+            searchButton.disabled = false;
+            setSearchStatus("Lost contact with the server.", false);
+            return;
+        }
+        const name = `"${status.title}" by ${status.artist}`;
+        if (status.state === "running") {
+            searchButton.disabled = true;
+            setSearchStatus(`Scraping ${name}\u2026 ${status.scanned}/${status.max_songs} songs`, true);
+            setTimeout(pollStatus, 2000);
+        } else if (status.state === "done") {
+            setSearchStatus(`Done: ${status.scanned} songs from ${name}.`, "finished");
+            location.reload();
+        } else if (status.state === "error") {
+            searchButton.disabled = false;
+            setSearchStatus(`Scrape failed: ${status.error}`, false);
+        } else {
+            searchButton.disabled = false;
+            setSearchStatus("", false);
+        }
+    }
+
+    searchForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        const query = searchInput.value.trim();
+        if (!query) return;
+        searchButton.disabled = true;
+        setSearchStatus("Searching Genius\u2026", false);
+        try {
+            const response = await fetch("search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || response.statusText);
+            const how = payload.matched === "artist" ? "most popular song" : "song";
+            setSearchStatus(`Scraping ${how} "${payload.title}" by ${payload.artist}\u2026`, true);
+            pollStatus();
+        } catch (error) {
+            searchButton.disabled = false;
+            setSearchStatus(location.protocol === "file:"
+                ? "Run 'genius-scraper serve' and open the page from there to scrape."
+                : `Could not start: ${error.message}`, false);
+        }
+    });
+
+    try {
+        const pending = JSON.parse(sessionStorage.getItem("search") || "null");
+        if (pending) {
+            searchInput.value = pending.query || "";
+            searchStatus.textContent = pending.status || "";
+            if (!pending.finished) { searchButton.disabled = true; pollStatus(); }
+        }
+    } catch (e) { /* storage unavailable */ }
 
     try {
         const saved = JSON.parse(sessionStorage.getItem("pathfinder") || "null");

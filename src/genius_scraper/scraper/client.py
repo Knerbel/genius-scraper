@@ -25,6 +25,9 @@ class GeniusClient:
         resp.raise_for_status()
         return resp.json()["response"]
 
+    def search(self, query: str) -> list[dict[str, Any]]:
+        return self._get("/search", q=query)["hits"]
+
     def search_artist(self, name: str) -> dict[str, Any] | None:
         hits = self._get("/search", q=name)["hits"]
         for hit in hits:

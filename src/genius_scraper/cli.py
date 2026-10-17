@@ -17,6 +17,7 @@ from .graph import write_graph_html
 from .pipeline import scrape_artist
 from .scraper.client import GeniusClient
 from .scraper.extractor import ARTIST_URL_RE, ArtistReference, extract_references, iter_link_attributes
+from .server import serve
 
 MIN_ARTIST_FOLLOWERS = 100
 
@@ -40,6 +41,16 @@ def main() -> None:
                         help="Stop after this many songs have been scanned (default: 10)")
     p_song.add_argument("--output", type=Path, default=Path("graph.html"),
                         help="Where to write the HTML graph (default: graph.html)")
+
+    p_serve = sub.add_parser(
+        "serve",
+        help="Serve the graph with a search box to start scrapes from the browser")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--max-songs", type=int, default=250,
+                         help="Songs to scan per scrape (default: 250)")
+    p_serve.add_argument("--output", type=Path, default=Path("graph.html"),
+                         help="Where to write the HTML graph (default: graph.html)")
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -65,6 +76,9 @@ def main() -> None:
         write_graph_html(results, args.song_id, args.output)
         logging.getLogger(__name__).info(
             "Graph written to %s", args.output.resolve())
+    elif args.command == "serve":
+        serve(settings, args.output, args.max_songs, crawl_song_references,
+              host=args.host, port=args.port)
 
 
 def collect_referenced_artists(

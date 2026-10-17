@@ -1,0 +1,12 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "/^python -m pytest tests/test_graph\\.py -q$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^python -m pytest -q$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
+}
